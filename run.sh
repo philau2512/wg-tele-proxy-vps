@@ -2,230 +2,20 @@
 
 # Script cài đặt WireGuard + Telegram routing + SOCKS5 proxy
 # Đã fix tất cả các lỗi: IPv6, endpoint conflicts, service conflicts
-# Version: 2.1 - Added user input customization
+# Version: 2.0 - Fixed
 
 set -e
 
 LOG_FILE="/var/log/wireguard_telegram_install.log"
 
-# Variables for user customization
-SOCKS5_USERNAME=""
-SOCKS5_PASSWORD=""
-SOCKS5_PORT=""
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-PURPLE='\033[0;35m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
-
-# Welcome banner
-show_welcome() {
-    clear
-    echo -e "${CYAN}"
-    echo "╔════════════════════════════════════════════════════════════╗"
-    echo "║                                                            ║"
-    echo "║           🚀 TELEGRAM PROXY INSTALLER v2.1 🚀             ║"
-    echo "║                                                            ║"
-    echo "║     Tự động cài đặt WireGuard + SOCKS5 cho Telegram       ║"
-    echo "║                                                            ║"
-    echo "║  ✅ WireGuard VPN                                          ║"
-    echo "║  ✅ SOCKS5 Proxy với authentication                       ║"
-    echo "║  ✅ Telegram routing chuyên dụng                          ║"
-    echo "║  ✅ Firewall tự động                                      ║"
-    echo "║  ✅ Management scripts                                     ║"
-    echo "║                                                            ║"
-    echo "╚════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
-    echo ""
-    echo -e "${YELLOW}⚠️  Lưu ý quan trọng:${NC}"
-    echo "• Script này cần chạy với quyền root"
-    echo "• Sẽ cài đặt và cấu hình các service mới"
-    echo "• DNS gốc sẽ được backup tự động"
-    echo "• Chỉ traffic Telegram được route qua VPN"
-    echo ""
-    
-    while true; do
-        echo -e -n "${GREEN}Bạn có muốn tiếp tục? (y/n): ${NC}"
-        read -r confirm
-        case $confirm in
-            [Yy]* ) 
-                echo ""
-                break
-                ;;
-            [Nn]* ) 
-                echo -e "${YELLOW}Đã hủy cài đặt.${NC}"
-                exit 0
-                ;;
-            * ) 
-                echo "Vui lòng nhập y hoặc n."
-                ;;
-        esac
-    done
-}
-
-# Logging function with colors
+# Logging function
 log() {
-    echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')] $1${NC}" | tee -a "$LOG_FILE"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
 }
 
 error() {
-    echo -e "${RED}[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $1${NC}" | tee -a "$LOG_FILE"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $1" | tee -a "$LOG_FILE"
     exit 1
-}
-
-# Function to get user input
-get_user_input() {
-    echo "=================================================="
-    echo "    THIẾT LẬP THÔNG SỐ SOCKS5 PROXY"
-    echo "=================================================="
-    echo ""
-    
-    # Kiểm tra xem có config cũ không
-    if [[ -f /etc/wireguard/telegram-proxy.conf ]]; then
-        echo "🔍 Phát hiện cấu hình cũ!"
-        echo ""
-        echo "1. Sử dụng cấu hình mới"
-        echo "2. Tải cấu hình cũ"
-        echo ""
-        
-        while true; do
-            echo -n "Chọn tùy chọn (1-2): "
-            read -r choice
-            case $choice in
-                1)
-                    echo "✅ Sẽ tạo cấu hình mới"
-                    break
-                    ;;
-                2)
-                    echo "📂 Đang tải cấu hình cũ..."
-                    source /etc/wireguard/telegram-proxy.conf
-                    echo ""
-                    echo "📋 Cấu hình cũ:"
-                    echo "Username: $SOCKS5_USERNAME"
-                    echo "Password: $(echo "$SOCKS5_PASSWORD" | sed 's/./*/g')"
-                    echo "Port: $SOCKS5_PORT"
-                    echo ""
-                    
-                    while true; do
-                        echo -n "Sử dụng cấu hình này? (y/n): "
-                        read -r confirm
-                        case $confirm in
-                            [Yy]*)
-                                echo "✅ Sử dụng cấu hình cũ"
-                                log "=== SỬ DỤNG CẤU HÌNH CŨ ==="
-                                log "SOCKS5 Username: $SOCKS5_USERNAME"
-                                log "SOCKS5 Password: [HIDDEN]"
-                                log "SOCKS5 Port: $SOCKS5_PORT"
-                                log "=========================="
-                                return
-                                ;;
-                            [Nn]*)
-                                echo "🔄 Tạo cấu hình mới..."
-                                break
-                                ;;
-                            *)
-                                echo "Vui lòng nhập y hoặc n."
-                                ;;
-                        esac
-                    done
-                    break
-                    ;;
-                *)
-                    echo "Vui lòng chọn 1 hoặc 2."
-                    ;;
-            esac
-        done
-        echo ""
-    fi
-    
-    # Get SOCKS5 username
-    while [[ -z "$SOCKS5_USERNAME" ]]; do
-        echo -n "Nhập username cho SOCKS5 proxy: "
-        read -r SOCKS5_USERNAME
-        if [[ -z "$SOCKS5_USERNAME" ]]; then
-            echo "❌ Username không được để trống!"
-        elif [[ ! "$SOCKS5_USERNAME" =~ ^[a-zA-Z0-9_-]+$ ]]; then
-            echo "❌ Username chỉ được chứa chữ cái, số, dấu _ và -"
-            SOCKS5_USERNAME=""
-        fi
-    done
-    
-    # Get SOCKS5 password
-    while [[ -z "$SOCKS5_PASSWORD" ]]; do
-        echo -n "Nhập password cho SOCKS5 proxy: "
-        read -s SOCKS5_PASSWORD
-        echo ""
-        if [[ -z "$SOCKS5_PASSWORD" ]]; then
-            echo "❌ Password không được để trống!"
-        elif [[ ${#SOCKS5_PASSWORD} -lt 6 ]]; then
-            echo "❌ Password phải có ít nhất 6 ký tự!"
-            SOCKS5_PASSWORD=""
-        fi
-    done
-    
-    # Get SOCKS5 port
-    while [[ -z "$SOCKS5_PORT" ]]; do
-        echo -n "Nhập port cho SOCKS5 proxy (1024-65535): "
-        read -r SOCKS5_PORT
-        if [[ -z "$SOCKS5_PORT" ]]; then
-            echo "❌ Port không được để trống!"
-        elif ! [[ "$SOCKS5_PORT" =~ ^[0-9]+$ ]]; then
-            echo "❌ Port phải là số!"
-            SOCKS5_PORT=""
-        elif [[ "$SOCKS5_PORT" -lt 1024 || "$SOCKS5_PORT" -gt 65535 ]]; then
-            echo "❌ Port phải trong khoảng 1024-65535!"
-            SOCKS5_PORT=""
-        elif netstat -tlnp 2>/dev/null | grep -q ":$SOCKS5_PORT "; then
-            echo "❌ Port $SOCKS5_PORT đã được sử dụng!"
-            SOCKS5_PORT=""
-        fi
-    done
-    
-    echo ""
-    echo "=================================================="
-    echo "           XÁC NHẬN THÔNG TIN"
-    echo "=================================================="
-    echo "Username: $SOCKS5_USERNAME"
-    echo "Password: $(echo "$SOCKS5_PASSWORD" | sed 's/./*/g')"
-    echo "Port: $SOCKS5_PORT"
-    echo ""
-    
-    while true; do
-        echo -n "Xác nhận thông tin trên đúng không? (y/n): "
-        read -r confirm
-        case $confirm in
-            [Yy]* ) 
-                echo ""
-                echo "✅ Bắt đầu cài đặt với thông số đã nhập..."
-                echo ""
-                break
-                ;;
-            [Nn]* ) 
-                echo ""
-                echo "🔄 Nhập lại thông tin..."
-                echo ""
-                SOCKS5_USERNAME=""
-                SOCKS5_PASSWORD=""
-                SOCKS5_PORT=""
-                get_user_input
-                return
-                ;;
-            * ) 
-                echo "Vui lòng nhập y hoặc n."
-                ;;
-        esac
-    done
-    
-    # Log the configuration
-    log "=== THÔNG SỐ NGƯỜI DÙNG ==="
-    log "SOCKS5 Username: $SOCKS5_USERNAME"
-    log "SOCKS5 Password: [HIDDEN]"
-    log "SOCKS5 Port: $SOCKS5_PORT"
-    log "=========================="
 }
 
 # Kiểm tra quyền root
@@ -634,14 +424,13 @@ EOF
 
 # Cấu hình SOCKS5 proxy
 configure_socks5() {
-    log "Cấu hình SOCKS5 proxy với thông số người dùng..."
-    log "Username: $SOCKS5_USERNAME, Port: $SOCKS5_PORT"
+    log "Cấu hình SOCKS5 proxy..."
     
     # Tạo user cho microsocks
     useradd -r -s /bin/false microsocks 2>/dev/null || true
     
-    # Tạo service cho microsocks với thông số người dùng
-    cat > /etc/systemd/system/microsocks.service << EOF
+    # Tạo service cho microsocks
+    cat > /etc/systemd/system/microsocks.service << 'EOF'
 [Unit]
 Description=Microsocks SOCKS5 proxy
 After=network.target
@@ -649,7 +438,7 @@ After=network.target
 [Service]
 Type=simple
 User=root
-ExecStart=/usr/local/bin/microsocks -i 0.0.0.0 -p $SOCKS5_PORT -u $SOCKS5_USERNAME -P $SOCKS5_PASSWORD
+ExecStart=/usr/local/bin/microsocks -i 0.0.0.0 -p 1080 -u wg-tele -P 123456789
 Restart=always
 RestartSec=3
 
@@ -660,20 +449,18 @@ EOF
     systemctl daemon-reload
     systemctl enable microsocks
     systemctl start microsocks
-    
-    log "✅ SOCKS5 proxy đã được cấu hình với port $SOCKS5_PORT"
 }
 
 # Cấu hình firewall
 configure_firewall() {
-    log "Cấu hình firewall với port SOCKS5: $SOCKS5_PORT..."
+    log "Cấu hình firewall..."
     
     # Kiểm tra xem ufw có tồn tại không
     if command -v ufw &> /dev/null; then
         log "Sử dụng UFW để cấu hình firewall..."
         # Cho phép các port cần thiết
         ufw allow 22/tcp comment "SSH"
-        ufw allow $SOCKS5_PORT/tcp comment "SOCKS5 Proxy"
+        ufw allow 1080/tcp comment "SOCKS5 Proxy"
         ufw allow 2408/udp comment "WireGuard"
         ufw allow 24700/tcp comment "Custom Port"
         ufw allow 3128/tcp comment "HTTP Proxy"
@@ -684,7 +471,7 @@ configure_firewall() {
         log "UFW không có, sử dụng iptables..."
         # Cấu hình iptables cơ bản
         iptables -A INPUT -p tcp --dport 22 -j ACCEPT
-        iptables -A INPUT -p tcp --dport $SOCKS5_PORT -j ACCEPT
+        iptables -A INPUT -p tcp --dport 1080 -j ACCEPT
         iptables -A INPUT -p udp --dport 2408 -j ACCEPT
         iptables -A INPUT -p tcp --dport 24700 -j ACCEPT
         iptables -A INPUT -p tcp --dport 3128 -j ACCEPT
@@ -732,8 +519,8 @@ test_connection() {
     
     # SOCKS5 status
     log "4. SOCKS5 status:"
-    if netstat -tlnp | grep -q :$SOCKS5_PORT; then
-        log "✓ SOCKS5 đang chạy trên port $SOCKS5_PORT"
+    if netstat -tlnp | grep -q :1080; then
+        log "✓ SOCKS5 đang chạy trên port 1080"
     else
         log "✗ SOCKS5 không chạy"
     fi
@@ -756,9 +543,9 @@ show_connection_info() {
     log ""
     log "📡 SOCKS5 Proxy Information:"
     log "Host: $PUBLIC_IP"
-    log "Port: $SOCKS5_PORT"
-    log "Username: $SOCKS5_USERNAME"
-    log "Password: $SOCKS5_PASSWORD"
+    log "Port: 1080"
+    log "Username: duchoa"
+    log "Password: 23031995"
     log "Type: SOCKS5"
     log ""
     log "📱 Cấu hình Telegram:"
@@ -766,9 +553,9 @@ show_connection_info() {
     log "2. Chọn 'Use Custom Proxy'"
     log "3. Proxy Type: SOCKS5"
     log "4. Server: $PUBLIC_IP"
-    log "5. Port: $SOCKS5_PORT"
-    log "6. Username: $SOCKS5_USERNAME"
-    log "7. Password: $SOCKS5_PASSWORD"
+    log "5. Port: 1080"
+    log "6. Username: duchoa"
+    log "7. Password: 23031995"
     log ""
     log "🔧 Quản lý services:"
     log "sudo systemctl status wg-quick@wg0"
@@ -782,27 +569,9 @@ show_connection_info() {
 create_management_scripts() {
     log "Tạo scripts quản lý hệ thống..."
     
-    # Tạo file config để lưu thông số người dùng
-    cat > /etc/wireguard/telegram-proxy.conf << EOF
-# Telegram Proxy Configuration
-SOCKS5_USERNAME="$SOCKS5_USERNAME"
-SOCKS5_PASSWORD="$SOCKS5_PASSWORD"
-SOCKS5_PORT="$SOCKS5_PORT"
-EOF
-    
-    chmod 600 /etc/wireguard/telegram-proxy.conf
-    log "✅ Đã tạo file config: /etc/wireguard/telegram-proxy.conf"
-    
     # Script kiểm tra trạng thái
     cat > /usr/local/bin/telegram-proxy-status << 'EOF'
 #!/bin/bash
-
-# Load configuration
-if [[ -f /etc/wireguard/telegram-proxy.conf ]]; then
-    source /etc/wireguard/telegram-proxy.conf
-else
-    SOCKS5_PORT="1080"  # fallback default
-fi
 
 echo "=== TRẠNG THÁI TELEGRAM PROXY ==="
 echo ""
@@ -827,13 +596,10 @@ echo ""
 echo "2. SOCKS5 Proxy Status:"
 if systemctl is-active --quiet microsocks; then
     echo "   ✅ Service: Running"
-    if netstat -tlnp 2>/dev/null | grep -q ":$SOCKS5_PORT "; then
-        echo "   ✅ Port: $SOCKS5_PORT listening"
-        if [[ -n "$SOCKS5_USERNAME" ]]; then
-            echo "   📊 Username: $SOCKS5_USERNAME"
-        fi
+    if netstat -tlnp 2>/dev/null | grep -q :1080; then
+        echo "   ✅ Port: 1080 listening"
     else
-        echo "   ❌ Port: $SOCKS5_PORT not listening"
+        echo "   ❌ Port: 1080 not listening"
     fi
 else
     echo "   ❌ Service: Stopped"
@@ -876,17 +642,6 @@ DEFAULT_ROUTE=$(ip route show default | head -1 | awk '{print $3}' 2>/dev/null |
 echo "   📊 Default Gateway: $DEFAULT_ROUTE"
 
 echo ""
-
-# Hiển thị thông tin kết nối SOCKS5
-if [[ -n "$SOCKS5_USERNAME" && -n "$SOCKS5_PORT" ]]; then
-    echo "=== THÔNG TIN SOCKS5 PROXY ==="
-    echo "Host: $PUBLIC_IP"
-    echo "Port: $SOCKS5_PORT"
-    echo "Username: $SOCKS5_USERNAME"
-    echo "Password: [Protected]"
-    echo ""
-fi
-
 echo "=== LỆNH QUẢN LÝ ==="
 echo "telegram-proxy-restart   - Khởi động lại tất cả services"
 echo "telegram-proxy-stop      - Dừng tất cả services" 
@@ -996,11 +751,9 @@ EOF
 
 # Main function
 main() {
-    show_welcome
     log "=== BẮT ĐẦU CÀI ĐẶT WIREGUARD + TELEGRAM ROUTING ==="
     
     check_root
-    get_user_input
     stop_old_services
     fix_repository
     install_packages
@@ -1017,17 +770,9 @@ main() {
     
     create_management_scripts
     
-    echo ""
-    echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║                                                            ║${NC}"
-    echo -e "${GREEN}║                  🎉 CÀI ĐẶT HOÀN TẤT! 🎉                  ║${NC}"
-    echo -e "${GREEN}║                                                            ║${NC}"
-    echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
-    echo ""
-    
     log "=== CÀI ĐẶT HOÀN TẤT ==="
     log "✅ WireGuard: Đã cài đặt và cấu hình"
-    log "✅ SOCKS5 Proxy: Đang chạy trên port $SOCKS5_PORT"
+    log "✅ SOCKS5 Proxy: Đang chạy trên port 1080"
     log "✅ Telegram Routing: Đã cấu hình"
     log "✅ Firewall: Đã cấu hình"
     log "✅ Management Scripts: Đã tạo"
@@ -1047,16 +792,6 @@ main() {
     log "   • DNS gốc đã được backup, các dịch vụ khác vẫn hoạt động bình thường"
     log "   • Chỉ traffic Telegram được route qua WireGuard"
     log "   • Nếu gặp vấn đề với DNS, chạy: telegram-proxy-cleanup"
-    log ""
-    
-    echo -e "${CYAN}📊 THÔNG TIN PROXY ĐÃ CẤU HÌNH:${NC}"
-    echo -e "${YELLOW}   Host: $(curl -s --connect-timeout 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')${NC}"
-    echo -e "${YELLOW}   Port: $SOCKS5_PORT${NC}"
-    echo -e "${YELLOW}   Username: $SOCKS5_USERNAME${NC}"
-    echo -e "${YELLOW}   Password: $SOCKS5_PASSWORD${NC}"
-    echo ""
-    echo -e "${PURPLE}🎯 Copy thông tin trên để cấu hình Telegram!${NC}"
-    echo ""
 }
 
 # Chạy script
